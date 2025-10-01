@@ -1,6 +1,6 @@
 const express = require("express")
 const { NoteModel } = require("../models/NoteModel")
-const bcrypt = require("bcrypt")
+const bcrypt = require("bcryptjs")
 const jwt = require("jsonwebtoken")
 const { authenticator } = require("../middleware/auth")
 

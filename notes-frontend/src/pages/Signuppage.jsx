@@ -30,7 +30,7 @@ import { BASE_URL } from '../constants/config';
     const [showPassword, setShowPassword] = useState(false);
 
     const handleSignUp = async()=>{
-      let data = await axios.post(BASE_URL+"/user/register", {
+      let data = await axios.post(BASE_URL + "/user/register", {
           name, email, password
       })
       let {message, status} = data.data
