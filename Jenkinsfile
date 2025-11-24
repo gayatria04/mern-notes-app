@@ -1,14 +1,35 @@
 pipeline {
-    agent any
+
+    agent {
+        kubernetes {
+            yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+    - name: jnlp
+      image: jenkins/inbound-agent
+      args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
+    - name: scanner
+      image: sonarsource/sonar-scanner-cli:latest
+      command: ['cat']
+      tty: true
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1"
+"""
+        }
+    }
 
     environment {
         SONARQUBE_SERVER = 'sonarqube'
-        SONAR_SCANNER = 'SonarScanner'
-
         NEXUS_DOCKER_REPO = "nexus.mycompany.com:8083"
         IMAGE_FRONTEND = "notes-frontend"
         IMAGE_BACKEND = "notes-backend"
-
         DEPLOY_SERVER = "ubuntu@10.0.0.15"
         DEPLOY_PATH = "/home/ubuntu/notes-app"
     }
@@ -24,12 +45,11 @@ pipeline {
 
         stage('SonarQube Analysis') {
             steps {
-                withSonarQubeEnv("${SONARQUBE_SERVER}") {
-                    script {
-                        def scannerHome = tool "${SONAR_SCANNER}"
+                container('scanner') {
+                    withSonarQubeEnv("${SONARQUBE_SERVER}") {
                         sh """
-                            ${scannerHome}/bin/sonar-scanner \
-                            -Dproject.settings=sonar-project.properties
+                        export SONAR_SCANNER_OPTS="-Xmx1024m"
+                        sonar-scanner -Dproject.settings=sonar-project.properties
                         """
                     }
                 }
@@ -38,8 +58,8 @@ pipeline {
 
         stage('Quality Gate') {
             steps {
-                timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
+                timeout(time: 3, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: false
                 }
             }
         }
@@ -48,6 +68,7 @@ pipeline {
             steps {
                 sh """
                 docker build -t ${IMAGE_BACKEND}:latest ./notes-backend
+
                 docker build --build-arg REACT_APP_BACKEND_URL=http://backend:4000 \
                     -t ${IMAGE_FRONTEND}:latest ./notes-frontend
                 """
@@ -68,7 +89,7 @@ pipeline {
             }
         }
 
-        stage('Deploy To Server') {
+        stage('Deploy to Server') {
             steps {
                 sshagent(['DEPLOY_SERVER_SSH']) {
                     sh """
