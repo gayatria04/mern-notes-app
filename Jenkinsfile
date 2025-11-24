@@ -50,7 +50,7 @@ spec:
         stage('SonarQube Analysis') {
             steps {
                 container('scanner') {
-                    withCredentials([string(credentialsId: 'sonar-token-2401199', variable: 'SONAR_TOKEN')]) {
+                    withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                         sh """
                             sonar-scanner \
                                 -Dsonar.projectKey=2401004_react_notes_app \
