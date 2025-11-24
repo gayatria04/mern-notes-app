@@ -3,8 +3,8 @@ pipeline {
 
     environment {
         // Sonar
-        SONARQUBE_SERVER = 'My-SonarQube'        // Name configured in Jenkins
-        SONAR_SCANNER = 'My-Sonar-Scanner'       // Scanner installation name in Jenkins
+        SONARQUBE_SERVER = 'sonarqube'        // Name configured in Jenkins
+        SONAR_SCANNER = 'SonarScanner'       // Scanner installation name in Jenkins
         
         // Nexus
         NEXUS_DOCKER_REPO = "nexus.mycompany.com:8083"   // example
@@ -20,7 +20,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 git branch: 'main',
-                    url: 'https://your.git.repo/react-notes-app.git'
+                    url: 'https://github.com/gayatria04/mern-notes-app'
             }
         }
 
