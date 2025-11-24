@@ -9,28 +9,61 @@ services:
     volumes:
       - mongo_data:/data/db
 
-
   backend:
-    build: ./notes-backend
+    image: nexus.mycompany.com:8083/notes-backend:latest
     container_name: notes-backend
     ports:
       - "4000:4000"
     env_file:
-      - ./notes-backend/.env
+      - ./backend.env
     depends_on:
       - mongo
 
-
   frontend:
-    build: 
-      context: ./notes-frontend
-      args: 
-        - REACT_APP_BACKEND_URL=http://localhost:4000
+    image: nexus.mycompany.com:8083/notes-frontend:latest
     container_name: notes-frontend
     ports:
-      - "3000:80"   
+      - "3000:80"
     depends_on:
       - backend
 
 volumes:
   mongo_data:
+
+
+# version: "3.8"
+
+# services:
+#   mongo:
+#     image: mongo:6.0
+#     container_name: notes-mongo
+#     ports:
+#       - "27017:27017"
+#     volumes:
+#       - mongo_data:/data/db
+
+
+#   backend:
+#     build: ./notes-backend
+#     container_name: notes-backend
+#     ports:
+#       - "4000:4000"
+#     env_file:
+#       - ./notes-backend/.env
+#     depends_on:
+#       - mongo
+
+
+#   frontend:
+#     build: 
+#       context: ./notes-frontend
+#       args: 
+#         - REACT_APP_BACKEND_URL=http://backend:4000
+#     container_name: notes-frontend
+#     ports:
+#       - "3000:80"   
+#     depends_on:
+#       - backend
+
+# volumes:
+#   mongo_data:
