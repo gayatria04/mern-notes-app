@@ -1,13 +1,32 @@
-# Use Node LTS
-FROM node:18-alpine
+FROM node:18-alpine AS build
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install --production
+RUN npm install --only=production
 
 COPY . .
 
-EXPOSE 4000
+FROM node:18-alpine
+WORKDIR /app
+COPY --from=build /app /app
 
-CMD ["node", "index.js"]
+EXPOSE 4000
+CMD ["npm", "start"]
+
+
+
+
+# # Use Node LTS
+# FROM node:18-alpine
+
+# WORKDIR /app
+
+# COPY package*.json ./
+# RUN npm install --production
+
+# COPY . .
+
+# EXPOSE 4000
+
+# CMD ["node", "index.js"]
