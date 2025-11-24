@@ -53,9 +53,9 @@ spec:
                     withCredentials([string(credentialsId: 'sonar-token-2401199', variable: 'SONAR_TOKEN')]) {
                         sh """
                             sonar-scanner \
-                                -Dsonar.projectKey=mern-notes-app \
+                                -Dsonar.projectKey=2401004_react_notes_app \
                                 -Dsonar.host.url=${SONAR_HOST_URL} \
-                                -Dsonar.login=$SONAR_TOKEN \
+                                -Dsonar.token=$SONAR_TOKEN \
                                 -Dproject.settings=sonar-project.properties
                         """
                     }
