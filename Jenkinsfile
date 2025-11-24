@@ -1,0 +1,84 @@
+pipeline {
+    agent any
+
+    environment {
+        // Sonar
+        SONARQUBE_SERVER = 'My-SonarQube'        // Name configured in Jenkins
+        SONAR_SCANNER = 'My-Sonar-Scanner'       // Scanner installation name in Jenkins
+        
+        // Nexus
+        NEXUS_DOCKER_REPO = "nexus.mycompany.com:8083"   // example
+        IMAGE_FRONTEND = "notes-frontend"
+        IMAGE_BACKEND = "notes-backend"
+
+        // Deployment
+        DEPLOY_SERVER = "ubuntu@10.0.0.15"      // your server
+        DEPLOY_PATH = "/home/ubuntu/notes-app"  // project location on server
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'main',
+                    url: 'https://your.git.repo/react-notes-app.git'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv("${SONARQUBE_SERVER}") {
+                    sh """
+                    ${SONAR_SCANNER}/bin/sonar-scanner \
+                    -Dproject.settings=sonar-project.properties
+                    """
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('Build Docker Images') {
+            steps {
+                sh """
+                docker build -t ${IMAGE_BACKEND}:latest ./notes-backend
+                docker build -t ${IMAGE_FRONTEND}:latest ./notes-frontend
+                """
+            }
+        }
+
+        stage('Tag & Push Images to Nexus') {
+            steps {
+                sh """
+                docker tag ${IMAGE_BACKEND}:latest ${NEXUS_DOCKER_REPO}/${IMAGE_BACKEND}:latest
+                docker tag ${IMAGE_FRONTEND}:latest ${NEXUS_DOCKER_REPO}/${IMAGE_FRONTEND}:latest
+
+                docker login ${NEXUS_DOCKER_REPO} -u admin -p admin123
+
+                docker push ${NEXUS_DOCKER_REPO}/${IMAGE_BACKEND}:latest
+                docker push ${NEXUS_DOCKER_REPO}/${IMAGE_FRONTEND}:latest
+                """
+            }
+        }
+
+        stage('Deploy to Server') {
+            steps {
+                sshagent (['DEPLOY_SERVER_SSH']) {
+                    sh """
+                    ssh -o StrictHostKeyChecking=no ${DEPLOY_SERVER} '
+                        cd ${DEPLOY_PATH} &&
+                        docker compose pull &&
+                        docker compose down &&
+                        docker compose up -d
+                    '
+                    """
+                }
+            }
+        }
+    }
+}
