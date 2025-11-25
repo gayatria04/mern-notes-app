@@ -14,7 +14,7 @@ spec:
       image: docker:24.0-dind
       securityContext:
         privileged: true
-      command: ['cat']
+      command: ['dockerd-entrypoint.sh']
       tty: true
       resources:
         requests:
@@ -49,6 +49,7 @@ spec:
     }
 
     stages {
+
         stage('Checkout') {
             steps {
                 git branch: 'main',
@@ -57,23 +58,21 @@ spec:
         }
 
         stage('SonarQube Analysis') {
-            agent none
             steps {
                 container('sonar-scanner') {
                     withSonarQubeEnv('my-sonarqube') {
                         sh '''
                             sonar-scanner \
-                            -Dsonar.projectKey=mern-notes-app \
-                            -Dsonar.projectName=mern-notes-app \
-                            -Dsonar.sources=. \
-                            -Dsonar.host.url=$SONAR_HOST_URL \
-                            -Dsonar.login=$SONAR_AUTH_TOKEN
+                              -Dsonar.projectKey=mern-notes-app \
+                              -Dsonar.projectName=mern-notes-app \
+                              -Dsonar.sources=. \
+                              -Dsonar.host.url=$SONAR_HOST_URL \
+                              -Dsonar.login=$SONAR_AUTH_TOKEN
                         '''
                     }
                 }
             }
         }
-
 
         stage('Quality Gate') {
             steps {
@@ -87,13 +86,10 @@ spec:
             steps {
                 container('docker') {
                     sh """
-                        # Wait for Docker daemon
                         sleep 15
 
-                        # Build backend image
                         docker build -t ${IMAGE_BACKEND}:latest ./notes-backend
 
-                        # Build frontend image with backend URL
                         docker build --build-arg REACT_APP_BACKEND_URL=http://backend:4000 \
                             -t ${IMAGE_FRONTEND}:latest ./notes-frontend
                     """
@@ -139,7 +135,7 @@ spec:
         always {
             echo 'Cleaning up dangling Docker images...'
             container('docker') {
-                sh 'docker system prune -f'
+                sh 'docker system prune -f || true'
             }
         }
         success {
@@ -150,6 +146,7 @@ spec:
         }
     }
 }
+
 
 
 // pipeline {
