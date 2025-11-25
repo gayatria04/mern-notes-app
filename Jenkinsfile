@@ -57,20 +57,23 @@ spec:
         }
 
         stage('SonarQube Analysis') {
+            agent none
             steps {
                 container('sonar-scanner') {
-                    withSonarQubeEnv('my-sonarqube'){
-                        sh """
+                    withSonarQubeEnv('my-sonarqube') {
+                        sh '''
                             sonar-scanner \
-                                -Dsonar.projectKey=2401004_react_notes_app \
-                                -Dsonar.host.url=${SONAR_HOST_URL} \
-                                -Dsonar.login=${SONAR_TOKEN} \
-                                -Dproject.settings=sonar-project.properties
-                        """
+                            -Dsonar.projectKey=mern-notes-app \
+                            -Dsonar.projectName=mern-notes-app \
+                            -Dsonar.sources=. \
+                            -Dsonar.host.url=$SONAR_HOST_URL \
+                            -Dsonar.login=$SONAR_AUTH_TOKEN
+                        '''
                     }
                 }
             }
         }
+
 
         stage('Quality Gate') {
             steps {
