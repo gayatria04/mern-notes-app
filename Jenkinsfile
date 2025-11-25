@@ -14,14 +14,27 @@ spec:
       image: docker:24.0-dind
       securityContext:
         privileged: true
-      command:
-        - cat
+      command: ['cat']
       tty: true
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1"
+        limits:
+          memory: "4Gi"
+          cpu: "2"
 
     - name: sonar-scanner
       image: sonarsource/sonar-scanner-cli:latest
       command: ['cat']
       tty: true
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1"
 """
         }
     }
@@ -51,7 +64,7 @@ spec:
                             sonar-scanner \
                                 -Dsonar.projectKey=2401004_react_notes_app \
                                 -Dsonar.host.url=${SONAR_HOST_URL} \
-                                -Dsonar.login=$SONAR_TOKEN \
+                                -Dsonar.login=${SONAR_TOKEN} \
                                 -Dproject.settings=sonar-project.properties
                         """
                     }
@@ -71,9 +84,15 @@ spec:
             steps {
                 container('docker') {
                     sh """
-                    docker build -t ${IMAGE_BACKEND}:latest ./notes-backend
-                    docker build --build-arg REACT_APP_BACKEND_URL=http://backend:4000 \
-                        -t ${IMAGE_FRONTEND}:latest ./notes-frontend
+                        # Wait for Docker daemon
+                        sleep 15
+
+                        # Build backend image
+                        docker build -t ${IMAGE_BACKEND}:latest ./notes-backend
+
+                        # Build frontend image with backend URL
+                        docker build --build-arg REACT_APP_BACKEND_URL=http://backend:4000 \
+                            -t ${IMAGE_FRONTEND}:latest ./notes-frontend
                     """
                 }
             }
@@ -82,15 +101,17 @@ spec:
         stage('Tag & Push Images to Nexus') {
             steps {
                 container('docker') {
-                    sh """
-                    docker login ${NEXUS_DOCKER_REPO} -u admin -p admin123
+                    withCredentials([usernamePassword(credentialsId: 'nexus-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                        sh """
+                            docker login ${NEXUS_DOCKER_REPO} -u $NEXUS_USER -p $NEXUS_PASS
 
-                    docker tag ${IMAGE_BACKEND}:latest ${NEXUS_DOCKER_REPO}/${IMAGE_BACKEND}:latest
-                    docker tag ${IMAGE_FRONTEND}:latest ${NEXUS_DOCKER_REPO}/${IMAGE_FRONTEND}:latest
+                            docker tag ${IMAGE_BACKEND}:latest ${NEXUS_DOCKER_REPO}/${IMAGE_BACKEND}:latest
+                            docker tag ${IMAGE_FRONTEND}:latest ${NEXUS_DOCKER_REPO}/${IMAGE_FRONTEND}:latest
 
-                    docker push ${NEXUS_DOCKER_REPO}/${IMAGE_BACKEND}:latest
-                    docker push ${NEXUS_DOCKER_REPO}/${IMAGE_FRONTEND}:latest
-                    """
+                            docker push ${NEXUS_DOCKER_REPO}/${IMAGE_BACKEND}:latest
+                            docker push ${NEXUS_DOCKER_REPO}/${IMAGE_FRONTEND}:latest
+                        """
+                    }
                 }
             }
         }
@@ -99,12 +120,12 @@ spec:
             steps {
                 sshagent(['DEPLOY_SERVER_SSH']) {
                     sh """
-                    ssh -o StrictHostKeyChecking=no ${DEPLOY_SERVER} '
-                        cd ${DEPLOY_PATH} &&
-                        docker compose pull &&
-                        docker compose down &&
-                        docker compose up -d
-                    '
+                        ssh -o StrictHostKeyChecking=no ${DEPLOY_SERVER} '
+                            cd ${DEPLOY_PATH} &&
+                            docker compose pull &&
+                            docker compose down &&
+                            docker compose up -d
+                        '
                     """
                 }
             }
@@ -126,6 +147,7 @@ spec:
         }
     }
 }
+
 
 // pipeline {
 
