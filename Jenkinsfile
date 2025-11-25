@@ -40,7 +40,7 @@ spec:
     }
 
     environment {
-        SONAR_HOST_URL = 'http://my-sonarqube-sonarqube.sonarqube.svc.cluster.local:9000'
+        SONAR_HOST_URL = 'http://sonarqube.imcc.com '
         NEXUS_DOCKER_REPO = "nexus.mycompany.com:8083"
         IMAGE_FRONTEND = "notes-frontend"
         IMAGE_BACKEND = "notes-backend"
@@ -61,18 +61,21 @@ spec:
             steps {
                 container('sonar-scanner') {
                     withSonarQubeEnv('my-sonarqube') {
-                        sh '''
-                            sonar-scanner \
-                              -Dsonar.projectKey=mern-notes-app \
-                              -Dsonar.projectName=mern-notes-app \
-                              -Dsonar.sources=. \
-                              -Dsonar.host.url=$SONAR_HOST_URL \
-                              -Dsonar.login=$SONAR_AUTH_TOKEN
-                        '''
+                        withCredentials([string(credentialsId: 'sonarqube-project-token', variable: 'SONAR_AUTH_TOKEN')]) {
+                            sh '''
+                                sonar-scanner \
+                                -Dsonar.projectKey=mern-notes-app \
+                                -Dsonar.projectName=mern-notes-app \
+                                -Dsonar.sources=. \
+                                -Dsonar.host.url=$SONAR_HOST_URL \
+                                -Dsonar.login=$SONAR_AUTH_TOKEN
+                            '''
+                        }
                     }
                 }
             }
         }
+
 
         stage('Quality Gate') {
             steps {
