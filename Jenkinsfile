@@ -4,38 +4,49 @@ pipeline {
             yaml """
 apiVersion: v1
 kind: Pod
-
+metadata:
+  name: jenkins-mern-pod
 spec:
+  serviceAccountName: jenkins
   containers:
     - name: jnlp
-      image: jenkins/inbound-agent
-      args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
+      image: jenkins/inbound-agent:latest
+      args:
+        - \$(JENKINS_SECRET)
+        - \$(JENKINS_NAME)
+      resources:
+        limits:
+          cpu: "200m"
+          memory: "512Mi"
+        requests:
+          cpu: "100m"
+          memory: "256Mi"
 
     - name: docker
       image: docker:24.0-dind
       securityContext:
         privileged: true
-      command: ['dockerd-entrypoint.sh']
+      command: ["dockerd-entrypoint.sh"]
       tty: true
       resources:
         requests:
-          memory: "2Gi"
-          cpu: "1"
-        limits:
-          memory: "4Gi"
-          cpu: "2"
-
-    - name: sonar-scanner
-      image: sonarsource/sonar-scanner-cli:latest
-      command: ['cat']
-      tty: true
-      resources:
-        requests:
+          cpu: "300m"
           memory: "1Gi"
-          cpu: "500m"
         limits:
+          cpu: "500m"
           memory: "2Gi"
-          cpu: "1"
+
+    - name: sonar
+      image: sonarsource/sonar-scanner-cli:latest
+      command: ["cat"]
+      tty: true
+      resources:
+        requests:
+          cpu: "200m"
+          memory: "512Mi"
+        limits:
+          cpu: "300m"
+          memory: "1Gi"
 """
         }
     }
@@ -54,29 +65,28 @@ spec:
         stage('Checkout') {
             steps {
                 git branch: 'main',
-                    url: 'https://github.com/gayatria04/mern-notes-app'
+                    url: 'https://github.com/gayatria04/mern-notes-app.git'
             }
         }
 
-        stage('SonarQube Analysis') {
+        stage('SonarQube Scan') {
             steps {
-                container('sonar-scanner') {
+                container('sonar') {
                     withSonarQubeEnv('my-sonarqube') {
                         withCredentials([string(credentialsId: 'sonarqube-project-token', variable: 'SONAR_AUTH_TOKEN')]) {
-                            sh '''
+                            sh """
                                 sonar-scanner \
                                 -Dsonar.projectKey=mern-notes-app \
                                 -Dsonar.projectName=mern-notes-app \
                                 -Dsonar.sources=. \
                                 -Dsonar.host.url=$SONAR_HOST_URL \
                                 -Dsonar.login=$SONAR_AUTH_TOKEN
-                            '''
+                            """
                         }
                     }
                 }
             }
         }
-
 
         stage('Quality Gate') {
             steps {
@@ -90,7 +100,7 @@ spec:
             steps {
                 container('docker') {
                     sh """
-                        sleep 15
+                        sleep 10
 
                         docker build -t ${IMAGE_BACKEND}:latest ./notes-backend
 
@@ -101,7 +111,7 @@ spec:
             }
         }
 
-        stage('Tag & Push Images to Nexus') {
+        stage('Push Images to Nexus') {
             steps {
                 container('docker') {
                     withCredentials([usernamePassword(credentialsId: 'nexus-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
@@ -119,7 +129,7 @@ spec:
             }
         }
 
-        stage('Deploy to Server') {
+        stage('Deploy to Production Server') {
             steps {
                 sshagent(['DEPLOY_SERVER_SSH']) {
                     sh """
@@ -137,7 +147,7 @@ spec:
 
     post {
         always {
-            echo 'Cleaning up dangling Docker images...'
+            echo 'Pruning Docker images...'
             container('docker') {
                 sh 'docker system prune -f || true'
             }
@@ -146,11 +156,10 @@ spec:
             echo 'CI/CD pipeline completed successfully!'
         }
         failure {
-            echo 'Pipeline failed. Please check the logs!'
+            echo 'Pipeline failed. Check the logs!'
         }
     }
 }
-
 
 
 // pipeline {
