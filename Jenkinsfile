@@ -1,58 +1,9 @@
 pipeline {
-    agent {
-        kubernetes {
-            yaml """
-apiVersion: v1
-kind: Pod
-metadata:
-  name: jenkins-mern-pod
-spec:
-  serviceAccountName: jenkins
-  containers:
-    - name: jnlp
-      image: jenkins/inbound-agent:latest
-      args:
-        - \$(JENKINS_SECRET)
-        - \$(JENKINS_NAME)
-      resources:
-        limits:
-          cpu: "200m"
-          memory: "512Mi"
-        requests:
-          cpu: "100m"
-          memory: "256Mi"
 
-    - name: docker
-      image: docker:24.0-dind
-      securityContext:
-        privileged: true
-      command: ["dockerd-entrypoint.sh"]
-      tty: true
-      resources:
-        requests:
-          cpu: "300m"
-          memory: "1Gi"
-        limits:
-          cpu: "500m"
-          memory: "2Gi"
-
-    - name: sonar
-      image: sonarsource/sonar-scanner-cli:latest
-      command: ["cat"]
-      tty: true
-      resources:
-        requests:
-          cpu: "200m"
-          memory: "512Mi"
-        limits:
-          cpu: "300m"
-          memory: "1Gi"
-"""
-        }
-    }
+    agent any
 
     environment {
-        SONAR_HOST_URL = 'http://sonarqube.imcc.com/'
+        SONAR_HOST_URL = 'http://sonarqube.imcc.com'
         NEXUS_DOCKER_REPO = "nexus.mycompany.com:8083"
         IMAGE_FRONTEND = "notes-frontend"
         IMAGE_BACKEND = "notes-backend"
@@ -65,24 +16,22 @@ spec:
         stage('Checkout') {
             steps {
                 git branch: 'main',
-                    url: 'https://github.com/gayatria04/mern-notes-app.git'
+                    url: 'https://github.com/gayatria04/mern-notes-app'
             }
         }
 
-        stage('SonarQube Scan') {
+        stage('SonarQube Analysis') {
             steps {
-                container('sonar') {
-                    withSonarQubeEnv('my-sonarqube') {
-                        withCredentials([string(credentialsId: 'sonarqube-project-token', variable: 'SONAR_AUTH_TOKEN')]) {
-                            sh """
-                                sonar-scanner \
-                                -Dsonar.projectKey=mern-notes-app \
-                                -Dsonar.projectName=mern-notes-app \
-                                -Dsonar.sources=. \
-                                -Dsonar.host.url=$SONAR_HOST_URL \
-                                -Dsonar.login=$SONAR_AUTH_TOKEN
-                            """
-                        }
+                withSonarQubeEnv('my-sonarqube') {
+                    withCredentials([string(credentialsId: 'sonarqube-project-token', variable: 'SONAR_AUTH_TOKEN')]) {
+                        sh '''
+                            sonar-scanner \
+                            -Dsonar.projectKey=mern-notes-app \
+                            -Dsonar.projectName=mern-notes-app \
+                            -Dsonar.sources=. \
+                            -Dsonar.host.url=$SONAR_HOST_URL \
+                            -Dsonar.login=$SONAR_AUTH_TOKEN
+                        '''
                     }
                 }
             }
@@ -98,38 +47,32 @@ spec:
 
         stage('Build Docker Images') {
             steps {
-                container('docker') {
+                sh """
+                    docker build -t ${IMAGE_BACKEND}:latest ./notes-backend
+
+                    docker build --build-arg REACT_APP_BACKEND_URL=http://backend:4000 \
+                        -t ${IMAGE_FRONTEND}:latest ./notes-frontend
+                """
+            }
+        }
+
+        stage('Tag & Push Images to Nexus') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'nexus-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                     sh """
-                        sleep 10
+                        docker login ${NEXUS_DOCKER_REPO} -u $NEXUS_USER -p $NEXUS_PASS
 
-                        docker build -t ${IMAGE_BACKEND}:latest ./notes-backend
+                        docker tag ${IMAGE_BACKEND}:latest ${NEXUS_DOCKER_REPO}/${IMAGE_BACKEND}:latest
+                        docker tag ${IMAGE_FRONTEND}:latest ${NEXUS_DOCKER_REPO}/${IMAGE_FRONTEND}:latest
 
-                        docker build --build-arg REACT_APP_BACKEND_URL=http://backend:4000 \
-                            -t ${IMAGE_FRONTEND}:latest ./notes-frontend
+                        docker push ${NEXUS_DOCKER_REPO}/${IMAGE_BACKEND}:latest
+                        docker push ${NEXUS_DOCKER_REPO}/${IMAGE_FRONTEND}:latest
                     """
                 }
             }
         }
 
-        stage('Push Images to Nexus') {
-            steps {
-                container('docker') {
-                    withCredentials([usernamePassword(credentialsId: 'nexus-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
-                        sh """
-                            docker login ${NEXUS_DOCKER_REPO} -u $NEXUS_USER -p $NEXUS_PASS
-
-                            docker tag ${IMAGE_BACKEND}:latest ${NEXUS_DOCKER_REPO}/${IMAGE_BACKEND}:latest
-                            docker tag ${IMAGE_FRONTEND}:latest ${NEXUS_DOCKER_REPO}/${IMAGE_FRONTEND}:latest
-
-                            docker push ${NEXUS_DOCKER_REPO}/${IMAGE_BACKEND}:latest
-                            docker push ${NEXUS_DOCKER_REPO}/${IMAGE_FRONTEND}:latest
-                        """
-                    }
-                }
-            }
-        }
-
-        stage('Deploy to Production Server') {
+        stage('Deploy to Server') {
             steps {
                 sshagent(['DEPLOY_SERVER_SSH']) {
                     sh """
@@ -147,19 +90,182 @@ spec:
 
     post {
         always {
-            echo 'Pruning Docker images...'
-            container('docker') {
-                sh 'docker system prune -f || true'
-            }
+            echo 'Cleaning up unused docker images...'
+            sh 'docker system prune -f || true'
         }
         success {
-            echo 'CI/CD pipeline completed successfully!'
+            echo 'Pipeline completed successfully!'
         }
         failure {
-            echo 'Pipeline failed. Check the logs!'
+            echo 'Pipeline failed — check logs!'
         }
     }
 }
+
+
+
+// pipeline {
+//     agent {
+//         kubernetes {
+//             yaml """
+// apiVersion: v1
+// kind: Pod
+// metadata:
+//   name: jenkins-mern-pod
+// spec:
+//   serviceAccountName: jenkins
+//   containers:
+//     - name: jnlp
+//       image: jenkins/inbound-agent:latest
+//       args:
+//         - \$(JENKINS_SECRET)
+//         - \$(JENKINS_NAME)
+//       resources:
+//         limits:
+//           cpu: "200m"
+//           memory: "512Mi"
+//         requests:
+//           cpu: "100m"
+//           memory: "256Mi"
+
+//     - name: docker
+//       image: docker:24.0-dind
+//       securityContext:
+//         privileged: true
+//       command: ["dockerd-entrypoint.sh"]
+//       tty: true
+//       resources:
+//         requests:
+//           cpu: "300m"
+//           memory: "1Gi"
+//         limits:
+//           cpu: "500m"
+//           memory: "2Gi"
+
+//     - name: sonar
+//       image: sonarsource/sonar-scanner-cli:latest
+//       command: ["cat"]
+//       tty: true
+//       resources:
+//         requests:
+//           cpu: "200m"
+//           memory: "512Mi"
+//         limits:
+//           cpu: "300m"
+//           memory: "1Gi"
+// """
+//         }
+//     }
+
+//     environment {
+//         SONAR_HOST_URL = 'http://sonarqube.imcc.com/'
+//         NEXUS_DOCKER_REPO = "nexus.mycompany.com:8083"
+//         IMAGE_FRONTEND = "notes-frontend"
+//         IMAGE_BACKEND = "notes-backend"
+//         DEPLOY_SERVER = "ubuntu@10.0.0.15"
+//         DEPLOY_PATH = "/home/ubuntu/notes-app"
+//     }
+
+//     stages {
+
+//         stage('Checkout') {
+//             steps {
+//                 git branch: 'main',
+//                     url: 'https://github.com/gayatria04/mern-notes-app.git'
+//             }
+//         }
+
+//         stage('SonarQube Scan') {
+//             steps {
+//                 container('sonar') {
+//                     withSonarQubeEnv('my-sonarqube') {
+//                         withCredentials([string(credentialsId: 'sonarqube-project-token', variable: 'SONAR_AUTH_TOKEN')]) {
+//                             sh """
+//                                 sonar-scanner \
+//                                 -Dsonar.projectKey=mern-notes-app \
+//                                 -Dsonar.projectName=mern-notes-app \
+//                                 -Dsonar.sources=. \
+//                                 -Dsonar.host.url=$SONAR_HOST_URL \
+//                                 -Dsonar.login=$SONAR_AUTH_TOKEN
+//                             """
+//                         }
+//                     }
+//                 }
+//             }
+//         }
+
+//         stage('Quality Gate') {
+//             steps {
+//                 timeout(time: 5, unit: 'MINUTES') {
+//                     waitForQualityGate abortPipeline: true
+//                 }
+//             }
+//         }
+
+//         stage('Build Docker Images') {
+//             steps {
+//                 container('docker') {
+//                     sh """
+//                         sleep 10
+
+//                         docker build -t ${IMAGE_BACKEND}:latest ./notes-backend
+
+//                         docker build --build-arg REACT_APP_BACKEND_URL=http://backend:4000 \
+//                             -t ${IMAGE_FRONTEND}:latest ./notes-frontend
+//                     """
+//                 }
+//             }
+//         }
+
+//         stage('Push Images to Nexus') {
+//             steps {
+//                 container('docker') {
+//                     withCredentials([usernamePassword(credentialsId: 'nexus-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+//                         sh """
+//                             docker login ${NEXUS_DOCKER_REPO} -u $NEXUS_USER -p $NEXUS_PASS
+
+//                             docker tag ${IMAGE_BACKEND}:latest ${NEXUS_DOCKER_REPO}/${IMAGE_BACKEND}:latest
+//                             docker tag ${IMAGE_FRONTEND}:latest ${NEXUS_DOCKER_REPO}/${IMAGE_FRONTEND}:latest
+
+//                             docker push ${NEXUS_DOCKER_REPO}/${IMAGE_BACKEND}:latest
+//                             docker push ${NEXUS_DOCKER_REPO}/${IMAGE_FRONTEND}:latest
+//                         """
+//                     }
+//                 }
+//             }
+//         }
+
+//         stage('Deploy to Production Server') {
+//             steps {
+//                 sshagent(['DEPLOY_SERVER_SSH']) {
+//                     sh """
+//                         ssh -o StrictHostKeyChecking=no ${DEPLOY_SERVER} '
+//                             cd ${DEPLOY_PATH} &&
+//                             docker compose pull &&
+//                             docker compose down &&
+//                             docker compose up -d
+//                         '
+//                     """
+//                 }
+//             }
+//         }
+//     }
+
+//     post {
+//         always {
+//             echo 'Pruning Docker images...'
+//             container('docker') {
+//                 sh 'docker system prune -f || true'
+//             }
+//         }
+//         success {
+//             echo 'CI/CD pipeline completed successfully!'
+//         }
+//         failure {
+//             echo 'Pipeline failed. Check the logs!'
+//         }
+//     }
+// }
 
 
 // pipeline {
