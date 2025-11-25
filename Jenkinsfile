@@ -2,8 +2,11 @@ pipeline {
     agent {
         kubernetes {
             yaml """
-apiVersion: v1
-kind: Pod
+apiVersion: net.gke.io/v1
+kind: ServiceExport
+metadata:
+  name: sonarqube-sonarqube
+  namespace: sonarqube
 spec:
   containers:
     - name: jnlp
@@ -40,7 +43,7 @@ spec:
     }
 
     environment {
-        SONAR_HOST_URL = 'http://sonarqube.imcc.com'
+        SONAR_HOST_URL = 'http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000'
         NEXUS_DOCKER_REPO = "nexus.mycompany.com:8083"
         IMAGE_FRONTEND = "notes-frontend"
         IMAGE_BACKEND = "notes-backend"
