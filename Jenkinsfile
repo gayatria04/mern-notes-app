@@ -57,8 +57,8 @@ spec:
 
                             sh '''
                                 sonar-scanner \
-                                -Dsonar.projectKey=mern-notes-app \
-                                -Dsonar.projectName=mern-notes-app \
+                                -Dsonar.projectKey=2401004_react_notes_app \
+                                -Dsonar.projectName=2401004_react_notes_app \
                                 -Dsonar.sources=. \
                                 -Dsonar.host.url=$SONAR_HOST_URL \
                                 -Dsonar.login=$SONAR_AUTH_TOKEN
