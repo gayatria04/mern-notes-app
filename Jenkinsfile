@@ -1,12 +1,41 @@
 pipeline {
+    agent {
+        kubernetes {
+            yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
 
-    agent any
+  - name: jnlp
+    image: jenkins/inbound-agent
+    args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
+
+  - name: docker
+    image: docker:24.0-dind
+    securityContext:
+      privileged: true
+    tty: true
+    env:
+    - name: DOCKER_TLS_CERTDIR
+      value: ""
+
+  - name: sonar-scanner
+    image: sonarsource/sonar-scanner-cli:latest
+    command: ['cat']
+    tty: true
+
+"""
+        }
+    }
 
     environment {
         SONAR_HOST_URL = 'http://sonarqube.imcc.com'
         NEXUS_DOCKER_REPO = "nexus.mycompany.com:8083"
-        IMAGE_FRONTEND = "notes-frontend"
+
         IMAGE_BACKEND = "notes-backend"
+        IMAGE_FRONTEND = "notes-frontend"
+
         DEPLOY_SERVER = "ubuntu@10.0.0.15"
         DEPLOY_PATH = "/home/ubuntu/notes-app"
     }
@@ -22,16 +51,19 @@ pipeline {
 
         stage('SonarQube Analysis') {
             steps {
-                withSonarQubeEnv('my-sonarqube') {
-                    withCredentials([string(credentialsId: 'sonarqube-project-token', variable: 'SONAR_AUTH_TOKEN')]) {
-                        sh '''
-                            sonar-scanner \
-                            -Dsonar.projectKey=mern-notes-app \
-                            -Dsonar.projectName=mern-notes-app \
-                            -Dsonar.sources=. \
-                            -Dsonar.host.url=$SONAR_HOST_URL \
-                            -Dsonar.login=$SONAR_AUTH_TOKEN
-                        '''
+                container('sonar-scanner') {
+                    withSonarQubeEnv('my-sonarqube') {
+                        withCredentials([string(credentialsId: 'sonarqube-project-token', variable: 'SONAR_AUTH_TOKEN')]) {
+
+                            sh '''
+                                sonar-scanner \
+                                -Dsonar.projectKey=mern-notes-app \
+                                -Dsonar.projectName=mern-notes-app \
+                                -Dsonar.sources=. \
+                                -Dsonar.host.url=$SONAR_HOST_URL \
+                                -Dsonar.login=$SONAR_AUTH_TOKEN
+                            '''
+                        }
                     }
                 }
             }
@@ -47,27 +79,33 @@ pipeline {
 
         stage('Build Docker Images') {
             steps {
-                sh """
-                    docker build -t ${IMAGE_BACKEND}:latest ./notes-backend
+                container('docker') {
+                    sh '''
+                        sleep 15
+                        docker build -t notes-backend:latest ./notes-backend
 
-                    docker build --build-arg REACT_APP_BACKEND_URL=http://backend:4000 \
-                        -t ${IMAGE_FRONTEND}:latest ./notes-frontend
-                """
+                        docker build \
+                          --build-arg REACT_APP_BACKEND_URL=http://backend:4000 \
+                          -t notes-frontend:latest ./notes-frontend
+                    '''
+                }
             }
         }
 
-        stage('Tag & Push Images to Nexus') {
+        stage('Push to Nexus') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'nexus-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
-                    sh """
-                        docker login ${NEXUS_DOCKER_REPO} -u $NEXUS_USER -p $NEXUS_PASS
+                container('docker') {
+                    withCredentials([usernamePassword(credentialsId: 'nexus-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                        sh '''
+                            docker login $NEXUS_DOCKER_REPO -u $NEXUS_USER -p $NEXUS_PASS
 
-                        docker tag ${IMAGE_BACKEND}:latest ${NEXUS_DOCKER_REPO}/${IMAGE_BACKEND}:latest
-                        docker tag ${IMAGE_FRONTEND}:latest ${NEXUS_DOCKER_REPO}/${IMAGE_FRONTEND}:latest
+                            docker tag notes-backend:latest $NEXUS_DOCKER_REPO/notes-backend:latest
+                            docker tag notes-frontend:latest $NEXUS_DOCKER_REPO/notes-frontend:latest
 
-                        docker push ${NEXUS_DOCKER_REPO}/${IMAGE_BACKEND}:latest
-                        docker push ${NEXUS_DOCKER_REPO}/${IMAGE_FRONTEND}:latest
-                    """
+                            docker push $NEXUS_DOCKER_REPO/notes-backend:latest
+                            docker push $NEXUS_DOCKER_REPO/notes-frontend:latest
+                        '''
+                    }
                 }
             }
         }
@@ -75,32 +113,35 @@ pipeline {
         stage('Deploy to Server') {
             steps {
                 sshagent(['DEPLOY_SERVER_SSH']) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no ${DEPLOY_SERVER} '
-                            cd ${DEPLOY_PATH} &&
+                    sh '''
+                        ssh -o StrictHostKeyChecking=no ubuntu@10.0.0.15 '
+                            cd /home/ubuntu/notes-app &&
                             docker compose pull &&
                             docker compose down &&
                             docker compose up -d
                         '
-                    """
+                    '''
                 }
             }
         }
+
     }
 
     post {
         always {
-            echo 'Cleaning up unused docker images...'
-            sh 'docker system prune -f || true'
+            container('docker') {
+                sh 'docker system prune -f || true'
+            }
         }
         success {
-            echo 'Pipeline completed successfully!'
+            echo "Pipeline completed successfully!"
         }
         failure {
-            echo 'Pipeline failed — check logs!'
+            echo "Pipeline failed. Check logs."
         }
     }
 }
+
 
 
 
