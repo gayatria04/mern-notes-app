@@ -2,7 +2,7 @@ pipeline {
     agent {
         kubernetes {
             yaml """
-apiVersion: net.gke.io/v1
+apiVersion: v1
 kind: Pod
 
 spec:
