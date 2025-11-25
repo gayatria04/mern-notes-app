@@ -3,10 +3,8 @@ pipeline {
         kubernetes {
             yaml """
 apiVersion: net.gke.io/v1
-kind: ServiceExport
-metadata:
-  name: sonarqube-sonarqube
-  namespace: sonarqube
+kind: Pod
+
 spec:
   containers:
     - name: jnlp
