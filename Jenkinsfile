@@ -25,7 +25,7 @@ spec:
     }
 
     environment {
-        SONAR_HOST_URL = 'http://sonarqube.sonarqube:9000'
+        SONAR_HOST_URL = 'http://sonarqube-sonarqube.sonarqube:9000'
         NEXUS_DOCKER_REPO = "nexus.mycompany.com:8083"
         IMAGE_FRONTEND = "notes-frontend"
     }
@@ -40,14 +40,20 @@ spec:
         stage('Verify SonarQube') {
             steps {
                 container('sonar-scanner') {
-                    sh '''
-                        echo "Testing SonarQube connectivity..."
-                        until curl -s --connect-timeout 5 http://sonarqube.sonarqube:9000/api/server/version; do
-                            echo "Waiting for SonarQube to be ready..."
-                            sleep 30
-                        done
-                        echo "✅ SonarQube is ready!"
-                    '''
+                    script {
+                        timeout(time: 10, unit: 'MINUTES') {
+                            waitUntil {
+                                script {
+                                    def result = sh(
+                                        script: 'curl -s --connect-timeout 5 http://sonarqube-sonarqube.sonarqube:9000/api/server/version || echo "NOT_READY"',
+                                        returnStdout: true
+                                    ).trim()
+                                    echo "SonarQube check result: ${result}"
+                                    return result != "NOT_READY"
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
