@@ -25,7 +25,7 @@ spec:
     }
 
     environment {
-        SONAR_HOST_URL = 'http://sonarqube.imcc.com'
+        SONAR_HOST_URL = 'http://sonarqube.svc.cluster.local:9000'
         NEXUS_DOCKER_REPO = "nexus.mycompany.com:8083"
         IMAGE_FRONTEND = "notes-frontend"
     }
