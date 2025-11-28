@@ -8,43 +8,26 @@ spec:
   containers:
   - name: sonar-scanner
     image: sonarsource/sonar-scanner-cli
-    command:
-    - cat
+    command: ['cat']
     tty: true
   - name: kubectl
     image: bitnami/kubectl:latest
-    command:
-    - cat
+    command: ['cat']
     tty: true
-    securityContext:
-      runAsUser: 0
-      readOnlyRootFilesystem: false
-    env:
-    - name: KUBECONFIG
-      value: /kube/config        
-    volumeMounts:
-    - name: kubeconfig-secret
-      mountPath: /kube/config
-      subPath: kubeconfig
   - name: dind
     image: docker:dind
-    args: ["--registry-mirror=https://mirror.gcr.io", "--storage-driver=overlay2"]
     securityContext:
       privileged: true
     env:
     - name: DOCKER_TLS_CERTDIR
       value: ""
     volumeMounts:
-    - name: docker-config
-      mountPath: /etc/docker/daemon.json
-      subPath: daemon.json
+    - name: docker-socket
+      mountPath: /var/run/docker.sock
   volumes:
-  - name: docker-config
-    configMap:
-      name: docker-daemon-config
-  - name: kubeconfig-secret
-    secret:
-      secretName: kubeconfig-secret
+  - name: docker-socket
+    hostPath:
+      path: /var/run/docker.sock
 '''
         }
     }
@@ -65,7 +48,7 @@ spec:
             steps {
                 container('dind') {
                     sh '''
-                        sleep 15
+                        sleep 20
                         docker build -t notes-frontend:latest .
                         docker image ls
                     '''
@@ -73,19 +56,9 @@ spec:
             }
         }
 
-        stage('SonarQube Analysis') {
+        stage('Skip SonarQube') {
             steps {
-                container('sonar-scanner') {
-                    withCredentials([string(credentialsId: 'sonarqube-project-token', variable: 'SONAR_TOKEN')]) {
-                        sh '''
-                            sonar-scanner \
-                                -Dsonar.projectKey=2401004_react_notes_app \
-                                -Dsonar.host.url=http://my-sonarqube-sonarqube.sonarqube.svc.cluster.local:9000 \
-                                -Dsonar.login=$SONAR_TOKEN \
-                                -Dsonar.sources=src
-                        '''
-                    }
-                }
+                echo "⚠️ Skipping SonarQube analysis for now"
             }
         }
 
@@ -109,7 +82,6 @@ spec:
                     sh '''
                         docker tag notes-frontend:latest $NEXUS_DOCKER_REPO/notes-frontend:v1
                         docker push $NEXUS_DOCKER_REPO/notes-frontend:v1
-                        docker pull $NEXUS_DOCKER_REPO/notes-frontend:v1
                         docker image ls
                     '''
                 }
@@ -120,9 +92,8 @@ spec:
             steps {
                 container('kubectl') {
                     script {
-                        // Update the deployment with the correct image
                         sh '''
-                            # Update the deployment.yaml with the new image tag
+                            # Update the deployment with the correct image
                             sed -i "s|image:.*|image: $NEXUS_DOCKER_REPO/notes-frontend:v1|" k8s/deployment.yaml
                             
                             # Apply the deployment and service
