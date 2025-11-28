@@ -6,24 +6,17 @@ apiVersion: v1
 kind: Pod
 spec:
   containers:
-  - name: sonar-scanner
-    image: sonarsource/sonar-scanner-cli
+  - name: docker
+    image: docker:24.0
     command: ['cat']
     tty: true
+    volumeMounts:
+    - name: docker-socket
+      mountPath: /var/run/docker.sock
   - name: kubectl
     image: bitnami/kubectl:latest
     command: ['cat']
     tty: true
-  - name: dind
-    image: docker:dind
-    securityContext:
-      privileged: true
-    env:
-    - name: DOCKER_TLS_CERTDIR
-      value: ""
-    volumeMounts:
-    - name: docker-socket
-      mountPath: /var/run/docker.sock
   volumes:
   - name: docker-socket
     hostPath:
@@ -46,9 +39,9 @@ spec:
 
         stage('Build Docker Image') {
             steps {
-                container('dind') {
+                container('docker') {
                     sh '''
-                        sleep 20
+                        docker version
                         docker build -t notes-frontend:latest .
                         docker image ls
                     '''
@@ -56,19 +49,11 @@ spec:
             }
         }
 
-        stage('Skip SonarQube') {
-            steps {
-                echo "⚠️ Skipping SonarQube analysis for now"
-            }
-        }
-
         stage('Login to Docker Registry') {
             steps {
-                container('dind') {
+                container('docker') {
                     withCredentials([usernamePassword(credentialsId: 'nexus-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                         sh '''
-                            docker --version
-                            sleep 10
                             docker login $NEXUS_DOCKER_REPO -u $NEXUS_USER -p $NEXUS_PASS
                         '''
                     }
@@ -78,7 +63,7 @@ spec:
 
         stage('Build - Tag - Push') {
             steps {
-                container('dind') {
+                container('docker') {
                     sh '''
                         docker tag notes-frontend:latest $NEXUS_DOCKER_REPO/notes-frontend:v1
                         docker push $NEXUS_DOCKER_REPO/notes-frontend:v1
