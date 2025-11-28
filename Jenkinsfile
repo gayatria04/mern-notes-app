@@ -1,28 +1,57 @@
 pipeline {
     agent {
         kubernetes {
-            yaml """
+            yaml '''
 apiVersion: v1
 kind: Pod
 spec:
   containers:
-    - name: jnlp
-      image: jenkins/inbound-agent
-    - name: docker
-      image: docker:24.0-dind
-      securityContext:
-        privileged: true
-      tty: true
-      env:
-      - name: DOCKER_TLS_CERTDIR
-        value: ""
-"""
+  - name: sonar-scanner
+    image: sonarsource/sonar-scanner-cli
+    command:
+    - cat
+    tty: true
+  - name: kubectl
+    image: bitnami/kubectl:latest
+    command:
+    - cat
+    tty: true
+    securityContext:
+      runAsUser: 0
+      readOnlyRootFilesystem: false
+    env:
+    - name: KUBECONFIG
+      value: /kube/config        
+    volumeMounts:
+    - name: kubeconfig-secret
+      mountPath: /kube/config
+      subPath: kubeconfig
+  - name: dind
+    image: docker:dind
+    args: ["--registry-mirror=https://mirror.gcr.io", "--storage-driver=overlay2"]
+    securityContext:
+      privileged: true
+    env:
+    - name: DOCKER_TLS_CERTDIR
+      value: ""
+    volumeMounts:
+    - name: docker-config
+      mountPath: /etc/docker/daemon.json
+      subPath: daemon.json
+  volumes:
+  - name: docker-config
+    configMap:
+      name: docker-daemon-config
+  - name: kubeconfig-secret
+    secret:
+      secretName: kubeconfig-secret
+'''
         }
     }
 
     environment {
         NEXUS_DOCKER_REPO = "nexus.mycompany.com:8083"
-        IMAGE_FRONTEND = "notes-frontend"
+        IMAGE_NAME = "notes-frontend"
     }
 
     stages {
@@ -32,32 +61,97 @@ spec:
             }
         }
 
-        stage('Build & Deploy') {
+        stage('Build Docker Image') {
             steps {
-                container('docker') {
-                    sh 'docker build -t notes-frontend:latest .'
-                    
-                    withCredentials([usernamePassword(credentialsId: 'nexus-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
-                        sh """
-                            docker login $NEXUS_DOCKER_REPO -u $NEXUS_USER -p $NEXUS_PASS
-                            docker tag notes-frontend:latest $NEXUS_DOCKER_REPO/notes-frontend:latest
-                            docker push $NEXUS_DOCKER_REPO/notes-frontend:latest
-                        """
+                container('dind') {
+                    sh '''
+                        sleep 15
+                        docker build -t notes-frontend:latest .
+                        docker image ls
+                    '''
+                }
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                container('sonar-scanner') {
+                    withCredentials([string(credentialsId: 'sonarqube-project-token', variable: 'SONAR_TOKEN')]) {
+                        sh '''
+                            sonar-scanner \
+                                -Dsonar.projectKey=2401004_react_notes_app \
+                                -Dsonar.host.url=http://my-sonarqube-sonarqube.sonarqube.svc.cluster.local:9000 \
+                                -Dsonar.login=$SONAR_TOKEN \
+                                -Dsonar.sources=src
+                        '''
                     }
-                    
-                    sh """
-                        kubectl apply -f k8s/deployment.yaml
-                        kubectl apply -f k8s/service.yaml
-                    """
+                }
+            }
+        }
+
+        stage('Login to Docker Registry') {
+            steps {
+                container('dind') {
+                    withCredentials([usernamePassword(credentialsId: 'nexus-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                        sh '''
+                            docker --version
+                            sleep 10
+                            docker login $NEXUS_DOCKER_REPO -u $NEXUS_USER -p $NEXUS_PASS
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Build - Tag - Push') {
+            steps {
+                container('dind') {
+                    sh '''
+                        docker tag notes-frontend:latest $NEXUS_DOCKER_REPO/notes-frontend:v1
+                        docker push $NEXUS_DOCKER_REPO/notes-frontend:v1
+                        docker pull $NEXUS_DOCKER_REPO/notes-frontend:v1
+                        docker image ls
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                container('kubectl') {
+                    script {
+                        // Update the deployment with the correct image
+                        sh '''
+                            # Update the deployment.yaml with the new image tag
+                            sed -i "s|image:.*|image: $NEXUS_DOCKER_REPO/notes-frontend:v1|" k8s/deployment.yaml
+                            
+                            # Apply the deployment and service
+                            kubectl apply -f k8s/deployment.yaml
+                            kubectl apply -f k8s/service.yaml
+
+                            # Wait for rollout to complete
+                            kubectl rollout status deployment/notes-frontend --timeout=300s
+                            
+                            # Show deployment status
+                            kubectl get deployments,services,pods -l app=notes-frontend
+                        '''
+                    }
                 }
             }
         }
     }
 
     post {
-        success { echo "🎉 Deploy Successful!" }
+        success { 
+            echo "🎉 Pipeline Successful!" 
+            echo "Application deployed to Kubernetes"
+        }
+        failure { 
+            echo "❌ Pipeline Failed!" 
+        }
     }
 }
+
 // pipeline {
 //     agent {
 //         kubernetes {
