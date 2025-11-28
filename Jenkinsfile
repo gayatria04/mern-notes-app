@@ -45,18 +45,25 @@ spec:
             }
         }
 
-        stage('Fix Import Case Sensitivity') {
+        stage('Fix Import Paths') {
             steps {
                 container('docker') {
-                    script {
-                        // Fix the case sensitivity issue in App.jsx
-                        sh '''
-                            echo "Fixing import case sensitivity in App.jsx..."
-                            sed -i 's|Noteform|NoteForm|g' src/App.jsx
-                            echo "Updated App.jsx imports:"
-                            cat src/App.jsx | grep "import.*from"
-                        '''
-                    }
+                    sh '''
+                        echo "=== Current File Structure ==="
+                        ls -la src/
+                        
+                        echo "=== Fixing Import Paths in App.jsx ==="
+                        # Fix the import paths to point to current directory instead of ./components/
+                        sed -i 's|from "./components/NoteForm.jsx"|from "./NoteForm.jsx"|g' src/App.jsx
+                        sed -i 's|from "./components/Note.jsx"|from "./Note.jsx"|g' src/App.jsx
+                        
+                        echo "=== Updated Imports ==="
+                        grep "import.*from" src/App.jsx
+                        
+                        echo "=== Verifying Files Exist ==="
+                        [ -f "src/NoteForm.jsx" ] && echo "✓ NoteForm.jsx exists" || echo "✗ NoteForm.jsx missing"
+                        [ -f "src/Note.jsx" ] && echo "✓ Note.jsx exists" || echo "✗ Note.jsx missing"
+                    '''
                 }
             }
         }
@@ -67,6 +74,7 @@ spec:
                     sh '''
                         echo "Building Docker image..."
                         docker build -t $IMAGE_NAME:latest .
+                        echo "Docker images:"
                         docker images | grep $IMAGE_NAME
                     '''
                 }
@@ -97,7 +105,7 @@ spec:
                             docker tag $IMAGE_NAME:latest $NEXUS_DOCKER_REPO/$IMAGE_NAME:latest
                             docker push $NEXUS_DOCKER_REPO/$IMAGE_NAME:\$tag
                             docker push $NEXUS_DOCKER_REPO/$IMAGE_NAME:latest
-                            echo "Image pushed successfully!"
+                            echo "✅ Image pushed successfully!"
                         """
                     }
                 }
@@ -107,26 +115,23 @@ spec:
         stage('Deploy to Kubernetes') {
             steps {
                 container('kubectl') {
-                    script {
-                        sh """
-                            echo "Deploying to Kubernetes..."
-                            # Apply deployment and service if they don't exist
-                            kubectl apply -f deployment.yaml || echo "Deployment already exists"
-                            kubectl apply -f service.yaml || echo "Service already exists"
-                            
-                            # Update deployment with new image
-                            kubectl set image deployment/notes-frontend notes-frontend=$NEXUS_DOCKER_REPO/$IMAGE_NAME:${env.BUILD_NUMBER} --record
-                            
-                            # Wait for rollout
-                            kubectl rollout status deployment/notes-frontend --timeout=300s
-                            
-                            echo "Deployment status:"
-                            kubectl get deployments,services,pods -l app=notes-frontend
-                            
-                            echo "Application logs:"
-                            kubectl logs deployment/notes-frontend --tail=10 || echo "Logs not available yet"
-                        """
-                    }
+                    sh """
+                        echo "Deploying to Kubernetes..."
+                        kubectl apply -f k8s/deployment.yaml || echo "Deployment applied"
+                        kubectl apply -f k8s/service.yaml || echo "Service applied"
+                        
+                        # Update deployment with new image
+                        kubectl set image deployment/notes-frontend notes-frontend=$NEXUS_DOCKER_REPO/$IMAGE_NAME:${env.BUILD_NUMBER} --record=true
+                        
+                        # Wait for rollout to complete
+                        kubectl rollout status deployment/notes-frontend --timeout=300s
+                        
+                        echo "✅ Deployment status:"
+                        kubectl get deployment/notes-frontend
+                        echo ""
+                        echo "✅ Pods status:"
+                        kubectl get pods -l app=notes-frontend
+                    """
                 }
             }
         }
@@ -141,12 +146,6 @@ spec:
         }
         failure { 
             echo "❌ Pipeline Failed!" 
-        }
-        always {
-            script {
-                // Clean up without container context
-                echo "Cleaning up workspace..."
-            }
         }
     }
 }

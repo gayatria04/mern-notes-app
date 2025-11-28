@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import NoteForm from "./components/Noteform.jsx"
-import Note from "./components/Note.jsx";
+import NoteForm from "./Noteform.jsx"
+import Note from "./Note.jsx";
 import "./App.css";
 
 function App() {
