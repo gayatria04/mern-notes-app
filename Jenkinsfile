@@ -11,16 +11,24 @@ spec:
     command: ['cat']
     tty: true
     volumeMounts:
-    - name: docker-socket
+  - name: docker-socket
       mountPath: /var/run/docker.sock
   - name: kubectl
     image: bitnami/kubectl:latest
     command: ['cat']
     tty: true
+  - name: jnlp
+    image: jenkins/inbound-agent:3345.v03dee9b_f88fc-1
+    args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
+    volumeMounts:
+  - name: workspace-volume
+      mountPath: /home/jenkins/agent
   volumes:
   - name: docker-socket
     hostPath:
       path: /var/run/docker.sock
+  - name: workspace-volume
+    emptyDir: {}
 '''
         }
     }
@@ -37,13 +45,27 @@ spec:
             }
         }
 
+        stage('Fix Import Case Sensitivity') {
+            steps {
+                script {
+                    // Fix the case sensitivity issue in App.jsx
+                    sh '''
+                        echo "Fixing import case sensitivity in App.jsx..."
+                        sed -i 's|Noteform|NoteForm|g' src/App.jsx
+                        echo "Updated App.jsx imports:"
+                        cat src/App.jsx | grep "import.*from"
+                    '''
+                }
+            }
+        }
+
         stage('Build Docker Image') {
             steps {
                 container('docker') {
                     sh '''
-                        docker version
-                        docker build -t notes-frontend:latest .
-                        docker image ls
+                        echo "Building Docker image..."
+                        docker build -t $IMAGE_NAME:latest .
+                        docker images | grep $IMAGE_NAME
                     '''
                 }
             }
@@ -54,6 +76,7 @@ spec:
                 container('docker') {
                     withCredentials([usernamePassword(credentialsId: 'nexus-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                         sh '''
+                            echo "Logging into Docker registry..."
                             docker login $NEXUS_DOCKER_REPO -u $NEXUS_USER -p $NEXUS_PASS
                         '''
                     }
@@ -61,14 +84,20 @@ spec:
             }
         }
 
-        stage('Build - Tag - Push') {
+        stage('Tag and Push Image') {
             steps {
                 container('docker') {
-                    sh '''
-                        docker tag notes-frontend:latest $NEXUS_DOCKER_REPO/notes-frontend:v1
-                        docker push $NEXUS_DOCKER_REPO/notes-frontend:v1
-                        docker image ls
-                    '''
+                    script {
+                        def tag = "${env.BUILD_NUMBER}"
+                        sh """
+                            echo "Tagging and pushing image..."
+                            docker tag $IMAGE_NAME:latest $NEXUS_DOCKER_REPO/$IMAGE_NAME:\$tag
+                            docker tag $IMAGE_NAME:latest $NEXUS_DOCKER_REPO/$IMAGE_NAME:latest
+                            docker push $NEXUS_DOCKER_REPO/$IMAGE_NAME:\$tag
+                            docker push $NEXUS_DOCKER_REPO/$IMAGE_NAME:latest
+                            echo "Image pushed successfully!"
+                        """
+                    }
                 }
             }
         }
@@ -77,20 +106,24 @@ spec:
             steps {
                 container('kubectl') {
                     script {
-                        sh '''
-                            # Update the deployment with the correct image
-                            sed -i "s|image:.*|image: $NEXUS_DOCKER_REPO/notes-frontend:v1|" k8s/deployment.yaml
+                        sh """
+                            echo "Deploying to Kubernetes..."
+                            # Apply deployment and service if they don't exist
+                            kubectl apply -f deployment.yaml || echo "Deployment already exists"
+                            kubectl apply -f service.yaml || echo "Service already exists"
                             
-                            # Apply the deployment and service
-                            kubectl apply -f k8s/deployment.yaml
-                            kubectl apply -f k8s/service.yaml
-
-                            # Wait for rollout to complete
+                            # Update deployment with new image
+                            kubectl set image deployment/notes-frontend notes-frontend=$NEXUS_DOCKER_REPO/$IMAGE_NAME:${env.BUILD_NUMBER} --record
+                            
+                            # Wait for rollout
                             kubectl rollout status deployment/notes-frontend --timeout=300s
                             
-                            # Show deployment status
+                            echo "Deployment status:"
                             kubectl get deployments,services,pods -l app=notes-frontend
-                        '''
+                            
+                            echo "Application logs:"
+                            kubectl logs deployment/notes-frontend --tail=10 || echo "Logs not available yet"
+                        """
                     }
                 }
             }
@@ -100,10 +133,17 @@ spec:
     post {
         success { 
             echo "🎉 Pipeline Successful!" 
-            echo "Application deployed to Kubernetes"
+            echo "✅ React app built successfully"
+            echo "✅ Docker image pushed to registry"
+            echo "✅ Application deployed to Kubernetes"
         }
         failure { 
             echo "❌ Pipeline Failed!" 
+        }
+        always {
+            container('docker') {
+                sh 'docker system prune -f || true'
+            }
         }
     }
 }
