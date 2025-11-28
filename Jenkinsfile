@@ -37,31 +37,28 @@ spec:
             }
         }
 
-        stage('Diagnose SonarQube Connectivity') {
-            steps {
-                container('sonar-scanner') {
-                    sh '''
-                        echo "Installing diagnostic tools..."
-                        apk add --no-cache curl bind-tools
-                        
-                        echo "Testing DNS resolution..."
-                        nslookup sonarqube.imcc.com || echo "External DNS failed"
-                        
-                        echo "Testing internal Kubernetes services..."
-                        nslookup sonarqube || echo "sonarqube service not found"
-                        nslookup sonarqube.sonarqube || echo "sonarqube.sonarqube service not found"
-                        nslookup sonarqube.default || echo "sonarqube.default service not found"
-                        
-                        echo "Testing connectivity to possible SonarQube URLs..."
-                        for url in "sonarqube:9000" "sonarqube.sonarqube:9000" "sonarqube.default:9000"; do
-                            echo "Testing: $url"
-                            curl -s --connect-timeout 5 "http://$url/api/server/version" && echo "✅ SUCCESS: $url" || echo "❌ FAILED: $url"
-                            echo "---"
-                        done
-                    '''
-                }
-            }
+stage('Diagnose SonarQube Connectivity') {
+    steps {
+        container('sonar-scanner') {
+            sh '''
+                echo "Testing SonarQube connectivity..."
+                
+                # Test common internal Kubernetes SonarQube URLs
+                echo "1. Testing: http://sonarqube:9000"
+                curl -s --connect-timeout 5 http://sonarqube:9000/api/server/version && echo "✅ SUCCESS: http://sonarqube:9000" || echo "❌ FAILED: http://sonarqube:9000"
+                
+                echo "2. Testing: http://sonarqube.sonarqube:9000"
+                curl -s --connect-timeout 5 http://sonarqube.sonarqube:9000/api/server/version && echo "✅ SUCCESS: http://sonarqube.sonarqube:9000" || echo "❌ FAILED: http://sonarqube.sonarqube:9000"
+                
+                echo "3. Testing: http://sonarqube.default:9000"
+                curl -s --connect-timeout 5 http://sonarqube.default:9000/api/server/version && echo "✅ SUCCESS: http://sonarqube.default:9000" || echo "❌ FAILED: http://sonarqube.default:9000"
+                
+                echo "4. Testing: http://sonarqube.jenkins:9000"
+                curl -s --connect-timeout 5 http://sonarqube.jenkins:9000/api/server/version && echo "✅ SUCCESS: http://sonarqube.jenkins:9000" || echo "❌ FAILED: http://sonarqube.jenkins:9000"
+            '''
         }
+    }
+}
 
         stage('SonarQube Analysis') {
             steps {
