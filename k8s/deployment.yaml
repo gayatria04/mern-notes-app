@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notes-frontend
+  labels:
+    app: notes-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notes-frontend
+  template:
+    metadata:
+      labels:
+        app: notes-frontend
+    spec:
+      containers:
+      - name: notes-frontend
+        image: nexus.mycompany.com:8083/notes-frontend:latest
+        ports:
+        - containerPort: 80
+        imagePullPolicy: Always
