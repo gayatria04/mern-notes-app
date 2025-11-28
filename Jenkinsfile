@@ -11,7 +11,7 @@ spec:
     command: ['cat']
     tty: true
     volumeMounts:
-  - name: docker-socket
+    - name: docker-socket
       mountPath: /var/run/docker.sock
   - name: kubectl
     image: bitnami/kubectl:latest
@@ -21,7 +21,7 @@ spec:
     image: jenkins/inbound-agent:3345.v03dee9b_f88fc-1
     args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
     volumeMounts:
-  - name: workspace-volume
+    - name: workspace-volume
       mountPath: /home/jenkins/agent
   volumes:
   - name: docker-socket
@@ -47,14 +47,16 @@ spec:
 
         stage('Fix Import Case Sensitivity') {
             steps {
-                script {
-                    // Fix the case sensitivity issue in App.jsx
-                    sh '''
-                        echo "Fixing import case sensitivity in App.jsx..."
-                        sed -i 's|Noteform|NoteForm|g' src/App.jsx
-                        echo "Updated App.jsx imports:"
-                        cat src/App.jsx | grep "import.*from"
-                    '''
+                container('docker') {
+                    script {
+                        // Fix the case sensitivity issue in App.jsx
+                        sh '''
+                            echo "Fixing import case sensitivity in App.jsx..."
+                            sed -i 's|Noteform|NoteForm|g' src/App.jsx
+                            echo "Updated App.jsx imports:"
+                            cat src/App.jsx | grep "import.*from"
+                        '''
+                    }
                 }
             }
         }
@@ -141,12 +143,139 @@ spec:
             echo "❌ Pipeline Failed!" 
         }
         always {
-            container('docker') {
-                sh 'docker system prune -f || true'
+            script {
+                // Clean up without container context
+                echo "Cleaning up workspace..."
             }
         }
     }
 }
+
+
+// pipeline {
+//     agent {
+//         kubernetes {
+//             yaml '''
+// apiVersion: v1
+// kind: Pod
+// spec:
+//   containers:
+//   - name: sonar-scanner
+//     image: sonarsource/sonar-scanner-cli
+//     command: ['cat']
+//     tty: true
+//   - name: kubectl
+//     image: bitnami/kubectl:latest
+//     command: ['cat']
+//     tty: true
+//   - name: dind
+//     image: docker:dind
+//     securityContext:
+//       privileged: true
+//     env:
+//     - name: DOCKER_TLS_CERTDIR
+//       value: ""
+//     volumeMounts:
+//     - name: docker-socket
+//       mountPath: /var/run/docker.sock
+//   volumes:
+//   - name: docker-socket
+//     hostPath:
+//       path: /var/run/docker.sock
+// '''
+//         }
+//     }
+
+//     environment {
+//         NEXUS_DOCKER_REPO = "nexus.mycompany.com:8083"
+//         IMAGE_NAME = "notes-frontend"
+//     }
+
+//     stages {
+//         stage('Checkout') {
+//             steps {
+//                 git branch: 'main', url: 'https://github.com/gayatria04/mern-notes-app'
+//             }
+//         }
+
+//         stage('Build Docker Image') {
+//             steps {
+//                 container('dind') {
+//                     sh '''
+//                         sleep 20
+//                         docker build -t notes-frontend:latest .
+//                         docker image ls
+//                     '''
+//                 }
+//             }
+//         }
+
+//         stage('Skip SonarQube') {
+//             steps {
+//                 echo "⚠️ Skipping SonarQube analysis for now"
+//             }
+//         }
+
+//         stage('Login to Docker Registry') {
+//             steps {
+//                 container('dind') {
+//                     withCredentials([usernamePassword(credentialsId: 'nexus-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+//                         sh '''
+//                             docker --version
+//                             sleep 10
+//                             docker login $NEXUS_DOCKER_REPO -u $NEXUS_USER -p $NEXUS_PASS
+//                         '''
+//                     }
+//                 }
+//             }
+//         }
+
+//         stage('Build - Tag - Push') {
+//             steps {
+//                 container('dind') {
+//                     sh '''
+//                         docker tag notes-frontend:latest $NEXUS_DOCKER_REPO/notes-frontend:v1
+//                         docker push $NEXUS_DOCKER_REPO/notes-frontend:v1
+//                         docker image ls
+//                     '''
+//                 }
+//             }
+//         }
+
+//         stage('Deploy to Kubernetes') {
+//             steps {
+//                 container('kubectl') {
+//                     script {
+//                         sh '''
+//                             # Update the deployment with the correct image
+//                             sed -i "s|image:.*|image: $NEXUS_DOCKER_REPO/notes-frontend:v1|" k8s/deployment.yaml
+                            
+//                             # Apply the deployment and service
+//                             kubectl apply -f k8s/deployment.yaml
+//                             kubectl apply -f k8s/service.yaml
+
+//                             # Wait for rollout to complete
+//                             kubectl rollout status deployment/notes-frontend --timeout=300s
+                            
+//                             # Show deployment status
+//                             kubectl get deployments,services,pods -l app=notes-frontend
+//                         '''
+//                     }
+//                 }
+//             }
+//         }
+//     }
+
+//     post {
+//         success { 
+//             echo "🎉 Pipeline Successful!" 
+//             echo "Application deployed to Kubernetes"
+//         }
+//         failure { 
+//             echo "❌ Pipeline Failed!" 
+//         }
+//     }
+// }
 
 // pipeline {
 //     agent {
