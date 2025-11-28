@@ -25,7 +25,7 @@ spec:
     }
 
     environment {
-        SONAR_HOST_URL = 'http://sonarqube.imcc.com/'
+        SONAR_HOST_URL = 'http://sonarqube.sonarqube.svc.cluster.local:9000'
         NEXUS_DOCKER_REPO = "nexus.mycompany.com:8083"
         IMAGE_FRONTEND = "notes-frontend"
     }
@@ -37,28 +37,16 @@ spec:
             }
         }
 
-stage('Diagnose SonarQube Connectivity') {
-    steps {
-        container('sonar-scanner') {
-            sh '''
-                echo "Testing SonarQube connectivity..."
-                
-                # Test common internal Kubernetes SonarQube URLs
-                echo "1. Testing: http://sonarqube:9000"
-                curl -s --connect-timeout 5 http://sonarqube:9000/api/server/version && echo "✅ SUCCESS: http://sonarqube:9000" || echo "❌ FAILED: http://sonarqube:9000"
-                
-                echo "2. Testing: http://sonarqube.sonarqube:9000"
-                curl -s --connect-timeout 5 http://sonarqube.sonarqube:9000/api/server/version && echo "✅ SUCCESS: http://sonarqube.sonarqube:9000" || echo "❌ FAILED: http://sonarqube.sonarqube:9000"
-                
-                echo "3. Testing: http://sonarqube.default:9000"
-                curl -s --connect-timeout 5 http://sonarqube.default:9000/api/server/version && echo "✅ SUCCESS: http://sonarqube.default:9000" || echo "❌ FAILED: http://sonarqube.default:9000"
-                
-                echo "4. Testing: http://sonarqube.jenkins:9000"
-                curl -s --connect-timeout 5 http://sonarqube.jenkins:9000/api/server/version && echo "✅ SUCCESS: http://sonarqube.jenkins:9000" || echo "❌ FAILED: http://sonarqube.jenkins:9000"
-            '''
+        stage('Verify SonarQube') {
+            steps {
+                container('sonar-scanner') {
+                    sh '''
+                        echo "Testing SonarQube connectivity..."
+                        curl -s --connect-timeout 10 http://sonarqube.sonarqube.svc.cluster.local:9000/api/server/version && echo "✅ SonarQube is accessible!" || echo "❌ SonarQube not accessible"
+                    '''
+                }
+            }
         }
-    }
-}
 
         stage('SonarQube Analysis') {
             steps {
@@ -78,7 +66,51 @@ stage('Diagnose SonarQube Connectivity') {
             }
         }
 
-        // ... rest of your stages remain the same
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                container('docker') {
+                    sh 'docker build -t notes-frontend:latest .'
+                }
+            }
+        }
+
+        stage('Push to Nexus') {
+            steps {
+                container('docker') {
+                    withCredentials([usernamePassword(credentialsId: 'nexus-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                        sh """
+                            docker login $NEXUS_DOCKER_REPO -u $NEXUS_USER -p $NEXUS_PASS
+                            docker tag notes-frontend:latest $NEXUS_DOCKER_REPO/notes-frontend:latest
+                            docker push $NEXUS_DOCKER_REPO/notes-frontend:latest
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                container('docker') {
+                    sh """
+                        kubectl apply -f k8s/deployment.yaml
+                        kubectl apply -f k8s/service.yaml
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success { echo "🎉 Deploy Successful!" }
+        failure { echo "❌ Pipeline Failed!" }
     }
 }
 
